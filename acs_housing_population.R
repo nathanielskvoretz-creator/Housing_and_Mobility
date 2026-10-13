@@ -50,34 +50,35 @@ acs_import <- function(file_location, base_file_names){
     
     acs <- read_csv(paste0(file_location, i, data_file), 
                          col_select = all_of(valid_cols),  # Ensures duplicate columns aren't selected. Without this the duplicate doesn't have a label mapping and shows up as the raw variable code
-                         col_types = cols(.default = "c"), # Ensures no issues when binding data sets
-                         id = "file"                       # creates file column with file_path. Helpful in merging errors and identifying the year variable
+                         col_types = cols(.default = "c"), # Ensures no issues when binding data sets.
+                         id = "file"                       # Creates a file variable using the file_path. Helpful in merging errors and identifying the year variable.
                          ) |>
       rename(any_of(variable_name_map)) |>                 # Rename mapping step.
       slice(-1)                                            # Removes the first row which contains the label information.
       
-    data_list[[as.character(i)]] <- acs                    # Stores imported dataset for each data file.
+    data_list[[as.character(i)]] <- acs                    # Stores the imported dataset for each data file.
   }
 bind_rows(data_list) |> 
-  mutate(across(!(file:geographic_area_name), \(x) na_if(x, y = "N")),  # Converts N values to NA
+  mutate(across(!(file:geographic_area_name), \(x) na_if(x, y = "N")),  # Converts N values to NA.
          across(!(file:geographic_area_name), \(x) as.numeric(x)),
-         year = as.character(str_extract(file, "20\\d{2}")),            # Extracts the year from the file name as a character
-         geography = str_remove(geography, "0500000US")                 # Cleans up the fips code
+         year = as.character(str_extract(file, "20\\d{2}")),            # Extracts the year from the file name as a character.
+         geography = str_remove(geography, "0500000US")                 # Cleans up the fips code.
   ) |> 
-  rename(fips = geography) |>                                           # Rename fips code for easier use
+  rename(fips = geography) |>                                           # Rename fips code varible to fips for easier use with usmaps package and plot which needs a fips varaible to show spatial data.
   relocate(year) |>                                                     
-  select(-file)                                                         # Relocates year as the first variable and drop file as it is no longer needed since year serves a similar function
+  select(-file)                                                         # Relocates year as the first variable and dropd file variable as it is no longer needed since the year varaible serves a similar function.
 }
 
-acs_pop<- acs_import(file_location = "data/ACS5Y/population/", base_file_names = acs_pop_base_files)   # Runs the above function and stores it.
+# Runs the above function and stores the merged and cleaned population and housing datsets
+acs_pop<- acs_import(file_location = "data/ACS5Y/population/", base_file_names = acs_pop_base_files)   
 acs_house_mortgage <- acs_import(file_location = "data/ACS5Y/housing/", base_file_names = acs_house_mortgage_base_files)
 acs_house_no_mortgage <- acs_import(file_location = "data/ACS5Y/housing/", base_file_names = acs_house_no_mortgage_base_files)
 
-# Merge housing and population data
+# Merge housing and population data by county and year. 
 acs_house <- acs_house_mortgage |> 
   left_join(acs_house_no_mortgage, by = join_by(year, fips, geographic_area_name), suffix = c("_m","_nm"))
 
-# Plot housing and population 
+# Plot the relationship between housing and population. Reveals a very linear relationships and a growth in both over time. 
 acs_pop |> 
   ggplot(aes(x = total_population, y = total_housing_units, color = year)) +
   geom_point(alpha = .3) +
@@ -87,7 +88,8 @@ acs_pop |>
   scale_x_continuous(
     labels = function(x) paste0(x / 1000, "k")
   ) +
-  geom_smooth(method = "lm")
+  geom_smooth(method = "lm") +
+  facet_wrap(~ year)
 
 # Plot housing and population log scale
 acs_pop |> 
@@ -95,12 +97,10 @@ acs_pop |>
   geom_point(alpha = .3) +
   geom_smooth(method = "lm")
 
-# housing total density distribution
+# Plot density distribution for toal housing units.
 acs_pop |> 
   ggplot(aes(x = log(total_housing_units), color = year)) +
   geom_density(aes(fill  = year), alpha = 0.1)
-
-# Join clean ACS data with spatial geometry for visuals and plot. Not as nice as usmaps version 
 
 # Total population by county. Color mapping is on a base 10 log scale. 
 acs_pop |> 
@@ -123,7 +123,7 @@ acs_pop |>
     labels = scales::comma
   )
 
-# Spatial distribution of population growth between 2014 and 2023
+# Spatial distribution of population growth between 2014 and 2023.
 acs_pop |> 
   select(year:total_population) |> 
   pivot_wider(
@@ -140,7 +140,7 @@ acs_pop |>
   plot_usmap(regions = "counties", data = _, values = "g14_23") +
   scale_fill_viridis_c()
 
-#spatial distribution of growth median housing prices for units without a mortgage between 2014 and 2023
+# Spatial distribution of the growth in median housing prices for units without a mortgage between 2014 and 2023.
 acs_house |> 
   select(year:geographic_area_name, value_median_nm) |>
   pivot_wider(
@@ -156,11 +156,11 @@ acs_house |>
   ) |> 
   plot_usmap(regions = "counties", data = _, values = "g14_23") +
   scale_fill_viridis_c(
-    limits = c(-30, 200), 
-    oob = scales::squish
+    limits = c(-30, 200),  # Limits the scle to -30% and 200%
+    oob = scales::squish  # Squishes outliers into the highest/lowest value of the limits. So a county with higher than 200% growth gets recorded as 200%.
   )
 
-# Relationship between median housing prices of units with and without a mortgage
+# Relationship between median housing prices of units with and without a mortgage. 
 acs_house |> 
   select(year:geographic_area_name, value_median_nm, value_median_m) |> 
   ggplot(aes(x = value_median_nm, y = value_median_m, color = year)) +
